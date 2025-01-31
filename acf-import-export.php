@@ -28,16 +28,34 @@ require_once ACF_IE_PLUGIN_DIR . 'includes/class-acf-export.php';
 
 // Initialize the plugin
 function acf_import_export_init() {
-    if (class_exists('ACF')) {
-        new ACF_Import_Export();
+    if (!class_exists('ACF')) {
+        add_action('admin_notices', 'acf_import_export_missing_acf_notice');
+        return;
     }
+    new ACF_Import_Export();
 }
 add_action('plugins_loaded', 'acf_import_export_init');
+
+// Display notice if ACF is not active
+function acf_import_export_missing_acf_notice() {
+    ?>
+    <div class="notice notice-error">
+        <p><?php esc_html_e('ACF Import Export requires Advanced Custom Fields to be installed and activated.', 'acf-import-export'); ?></p>
+    </div>
+    <?php
+}
 
 // Activation hook
 register_activation_hook(__FILE__, 'acf_import_export_activate');
 function acf_import_export_activate() {
-    // Activation code here
+    if (!class_exists('ACF')) {
+        deactivate_plugins(plugin_basename(__FILE__));
+        wp_die(
+            esc_html__('This plugin requires Advanced Custom Fields to be installed and activated.', 'acf-import-export'),
+            'Plugin Activation Error',
+            array('back_link' => true)
+        );
+    }
 }
 
 // Deactivation hook

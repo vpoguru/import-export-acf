@@ -17,66 +17,144 @@ class ACF_Import {
             wp_die(esc_html__('No file was uploaded.', 'acf-import-export'));
         }
 
-        $file = array_map('sanitize_text_field', wp_unslash($_FILES['import_file']));
+        $file = $_FILES['import_file'];
         
+        // Basic file checks
         if ($file['error'] !== UPLOAD_ERR_OK) {
-            wp_die(esc_html__('Error uploading file.', 'acf-import-export'));
+            $error_message = $this->get_upload_error_message($file['error']);
+            wp_die(esc_html($error_message));
         }
 
-        $file_extension = strtolower(pathinfo(sanitize_file_name($file['name']), PATHINFO_EXTENSION));
-        
+        // Check file size
+        $max_size = wp_max_upload_size();
+        if ($file['size'] > $max_size) {
+            wp_die(sprintf(
+                /* translators: %s: Maximum allowed file size in MB */
+                esc_html__('File is too large. Maximum allowed size is %s.', 'acf-import-export'),
+                size_format($max_size)
+            ));
+        }
+
+        // Verify file extension
+        $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         if ($file_extension !== 'csv') {
-            wp_die(esc_html__('Only CSV files are supported.', 'acf-import-export'));
+            wp_die(esc_html__('Only CSV files are supported. Please export your data in CSV format and try again.', 'acf-import-export'));
         }
 
-        $import_type = isset($_POST['import_type']) ? sanitize_text_field(wp_unslash($_POST['import_type'])) : 'structure';
-        
-        if ($import_type === 'content') {
-            $post_type = isset($_POST['post_type']) ? sanitize_text_field(wp_unslash($_POST['post_type'])) : '';
-            if (empty($post_type)) {
-                wp_die(esc_html__('No post type selected for content import.', 'acf-import-export'));
+        // Upload the file to WordPress media directory
+        $upload = wp_upload_bits(
+            $file['name'],
+            null,
+            file_get_contents($file['tmp_name'])
+        );
+
+        if ($upload['error']) {
+            wp_die(sprintf(
+                /* translators: %s: Upload error message */
+                esc_html__('Failed to upload file: %s', 'acf-import-export'),
+                esc_html($upload['error'])
+            ));
+        }
+
+        $file_path = $upload['file'];
+
+        try {
+            // Verify CSV format
+            $handle = fopen($file_path, 'r');
+            if ($handle === false) {
+                wp_die(esc_html__('Error opening the CSV file. Please try again.', 'acf-import-export'));
             }
+
+            // Try to read the first line to verify CSV format
+            $first_line = fgetcsv($handle);
+            if ($first_line === false || count($first_line) < 1) {
+                fclose($handle);
+                unlink($file_path); // Clean up the uploaded file
+                wp_die(esc_html__('The uploaded file appears to be empty or not properly formatted as CSV.', 'acf-import-export'));
+            }
+            fclose($handle);
+
+            $import_type = isset($_POST['import_type']) ? sanitize_text_field(wp_unslash($_POST['import_type'])) : 'structure';
             
-            $results = $this->import_post_type_content($file['tmp_name'], $post_type);
-        } else {
-            $import_data = $this->parse_csv_file($file['tmp_name']);
+            if ($import_type === 'content') {
+                $post_type = isset($_POST['post_type']) ? sanitize_text_field(wp_unslash($_POST['post_type'])) : '';
+                if (empty($post_type)) {
+                    unlink($file_path); // Clean up the uploaded file
+                    wp_die(esc_html__('No post type selected for content import.', 'acf-import-export'));
+                }
+                
+                $results = $this->import_post_type_content($file_path, $post_type);
+            } else {
+                $import_data = $this->parse_csv_file($file_path);
+                if (empty($import_data)) {
+                    unlink($file_path); // Clean up the uploaded file
+                    wp_die(esc_html__('No valid data found in the CSV file. Please verify the file format matches the export format.', 'acf-import-export'));
+                }
 
-            $results = array(
-                'success' => array(),
-                'errors' => array()
-            );
+                $results = array(
+                    'success' => array(),
+                    'errors' => array()
+                );
 
-            // Import field groups
-            if (isset($import_data['field_groups'])) {
-                $results['field_groups'] = $this->import_field_groups($import_data['field_groups']);
+                // Import field groups
+                if (isset($import_data['field_groups'])) {
+                    $results['field_groups'] = $this->import_field_groups($import_data['field_groups']);
+                }
+
+                // Import post types
+                if (isset($import_data['post_types'])) {
+                    $results['post_types'] = $this->import_post_types($import_data['post_types']);
+                }
+
+                // Import taxonomies
+                if (isset($import_data['taxonomies'])) {
+                    $results['taxonomies'] = $this->import_taxonomies($import_data['taxonomies']);
+                }
             }
 
-            // Import post types
-            if (isset($import_data['post_types'])) {
-                $results['post_types'] = $this->import_post_types($import_data['post_types']);
-            }
+            // Clean up - delete the uploaded file
+            unlink($file_path);
 
-            // Import taxonomies
-            if (isset($import_data['taxonomies'])) {
-                $results['taxonomies'] = $this->import_taxonomies($import_data['taxonomies']);
+            // Redirect back with results
+            $redirect_url = add_query_arg(array(
+                'page' => 'acf-import-export',
+                'import_status' => 'complete',
+                'success_count' => count($results['success']),
+                'error_count' => count($results['errors'])
+            ), admin_url('edit.php?post_type=acf-field-group'));
+
+            wp_safe_redirect($redirect_url);
+            exit;
+
+        } catch (Exception $e) {
+            // Clean up on error
+            if (file_exists($file_path)) {
+                unlink($file_path);
             }
+            wp_die(sprintf(
+                /* translators: %s: Error message */
+                esc_html__('Error processing the import: %s', 'acf-import-export'),
+                esc_html($e->getMessage())
+            ));
         }
-
-        // Redirect back with results
-        $redirect_url = add_query_arg(array(
-            'page' => 'acf-import-export',
-            'import_status' => 'complete',
-            'success_count' => count($results['success']),
-            'error_count' => count($results['errors'])
-        ), admin_url('edit.php?post_type=acf-field-group'));
-
-        wp_safe_redirect($redirect_url);
-        exit;
     }
 
     private function parse_csv_file($file_path) {
-        global $wp_filesystem;
-        WP_Filesystem();
+        if (!file_exists($file_path)) {
+            throw new Exception(__('Import file not found.', 'acf-import-export'));
+        }
+
+        if (!is_readable($file_path)) {
+            throw new Exception(__('Import file is not readable.', 'acf-import-export'));
+        }
+
+        $handle = fopen($file_path, 'r');
+        if ($handle === false) {
+            throw new Exception(__('Failed to open the CSV file.', 'acf-import-export'));
+        }
+
+        // Set CSV reading options
+        setlocale(LC_ALL, 'en_US.UTF-8');
 
         $import_data = array(
             'field_groups' => array(),
@@ -84,32 +162,53 @@ class ACF_Import {
             'taxonomies' => array()
         );
 
-        $file_content = $wp_filesystem->get_contents($file_path);
-        $rows = array_map('str_getcsv', explode("\n", $file_content));
-        
-        // Remove empty rows
-        $rows = array_filter($rows);
-        
-        // Skip header row
-        array_shift($rows);
-        
-        foreach ($rows as $data) {
-            if (count($data) < 4) continue;
+        // Read header row
+        $headers = fgetcsv($handle);
+        if ($headers === false || count($headers) < 4) {
+            fclose($handle);
+            throw new Exception(__('Invalid CSV format. The file must contain at least 4 columns: Type, Key, Title, and Fields.', 'acf-import-export'));
+        }
+
+        // Verify header format
+        $required_headers = array('Type', 'Key', 'Title', 'Fields');
+        $missing_headers = array_diff($required_headers, $headers);
+        if (!empty($missing_headers)) {
+            fclose($handle);
+            throw new Exception(sprintf(
+                /* translators: %s: List of missing headers */
+                __('Missing required columns in CSV: %s', 'acf-import-export'),
+                implode(', ', $missing_headers)
+            ));
+        }
+
+        // Process each row
+        while (($data = fgetcsv($handle)) !== false) {
+            if (count($data) < 4) {
+                continue;
+            }
+
+            // Trim whitespace from data
+            $data = array_map('trim', $data);
             
             list($type, $key, $title, $fields_str) = $data;
             
             switch ($type) {
                 case 'field_group':
                     $fields = array();
-                    $field_parts = explode('|', $fields_str);
-                    foreach ($field_parts as $field_part) {
-                        list($name, $type) = explode(':', $field_part);
-                        $fields[] = array(
-                            'key' => 'field_' . uniqid(),
-                            'name' => $name,
-                            'type' => $type,
-                            'label' => ucfirst($name)
-                        );
+                    if (!empty($fields_str)) {
+                        $field_parts = explode('|', $fields_str);
+                        foreach ($field_parts as $field_part) {
+                            $field_data = explode(':', $field_part);
+                            if (count($field_data) >= 2) {
+                                list($name, $type) = $field_data;
+                                $fields[] = array(
+                                    'key' => 'field_' . uniqid(),
+                                    'name' => trim($name),
+                                    'type' => trim($type),
+                                    'label' => ucfirst(trim($name))
+                                );
+                            }
+                        }
                     }
                     
                     $import_data['field_groups'][] = array(
@@ -120,7 +219,8 @@ class ACF_Import {
                     break;
                     
                 case 'post_type':
-                    $supports = explode('|', $fields_str);
+                    $supports = !empty($fields_str) ? explode('|', $fields_str) : array();
+                    $supports = array_map('trim', $supports);
                     $import_data['post_types'][$key] = array(
                         'labels' => (object)array('name' => $title),
                         'args' => array(
@@ -133,7 +233,8 @@ class ACF_Import {
                     break;
                     
                 case 'taxonomy':
-                    $object_types = explode('|', $fields_str);
+                    $object_types = !empty($fields_str) ? explode('|', $fields_str) : array();
+                    $object_types = array_map('trim', $object_types);
                     $import_data['taxonomies'][$key] = array(
                         'labels' => (object)array('name' => $title),
                         'args' => array(
@@ -146,6 +247,7 @@ class ACF_Import {
             }
         }
 
+        fclose($handle);
         return $import_data;
     }
 
@@ -253,221 +355,268 @@ class ACF_Import {
     }
 
     private function import_post_type_content($file_path, $post_type) {
-        global $wp_filesystem;
-        WP_Filesystem();
+        if (!post_type_exists($post_type)) {
+            throw new Exception(sprintf(
+                __('Post type "%s" does not exist.', 'acf-import-export'),
+                $post_type
+            ));
+        }
 
         $results = array(
             'success' => array(),
             'errors' => array()
         );
 
-        $file_content = $wp_filesystem->get_contents($file_path);
-        $rows = array_map('str_getcsv', explode("\n", $file_content));
-        
-        // Remove empty rows
-        $rows = array_filter($rows);
-        
-        $headers = array_shift($rows);
-        $data = array();
-        
-        foreach ($rows as $row) {
-            if (!empty($row)) {
-                $data[] = array_combine($headers, $row);
+        // Read the CSV file
+        $handle = fopen($file_path, 'r');
+        if ($handle === false) {
+            throw new Exception(__('Failed to open the CSV file.', 'acf-import-export'));
+        }
+
+        // Read and validate headers
+        $headers = fgetcsv($handle);
+        if (!$headers) {
+            fclose($handle);
+            throw new Exception(__('Failed to read CSV headers.', 'acf-import-export'));
+        }
+
+        // Clean headers
+        $headers = array_map('trim', $headers);
+
+        // Track row number for error reporting
+        $row_number = 1;
+
+        // Process each row
+        while (($row = fgetcsv($handle)) !== false) {
+            $row_number++;
+
+            try {
+                if (empty($row) || count($row) !== count($headers)) {
+                    throw new Exception(sprintf(
+                        __('Invalid number of columns in row %d', 'acf-import-export'),
+                        $row_number
+                    ));
+                }
+
+                // Create associative array from headers and row data
+                $row_data = array_combine($headers, array_map('trim', $row));
+
+                // Prepare post data
+                $post_data = array(
+                    'post_type' => $post_type,
+                    'post_status' => 'publish'
+                );
+
+                // Map WordPress core fields
+                $wp_fields_map = array(
+                    'Title' => 'post_title',
+                    'Content' => 'post_content',
+                    'Excerpt' => 'post_excerpt',
+                    'Status' => 'post_status',
+                    'Date' => 'post_date',
+                    'Author' => 'post_author',
+                    'Slug' => 'post_name'
+                );
+
+                foreach ($wp_fields_map as $csv_field => $wp_field) {
+                    if (!empty($row_data[$csv_field])) {
+                        $post_data[$wp_field] = $row_data[$csv_field];
+                    }
+                }
+
+                // Handle existing post update if ID is provided
+                if (!empty($row_data['ID'])) {
+                    $existing_post = get_post($row_data['ID']);
+                    if ($existing_post && $existing_post->post_type === $post_type) {
+                        $post_data['ID'] = $row_data['ID'];
+                    }
+                }
+
+                // Insert or update post
+                $post_id = wp_insert_post($post_data, true);
+                if (is_wp_error($post_id)) {
+                    throw new Exception($post_id->get_error_message());
+                }
+
+                // Process ACF fields
+                $field_groups = acf_get_field_groups(array('post_type' => $post_type));
+                
+                foreach ($field_groups as $field_group) {
+                    $fields = acf_get_fields($field_group);
+                    
+                    foreach ($fields as $field) {
+                        $field_key = $field['name'];
+                        $field_label = $field['label'];
+                        
+                        // Try both the field name and label as column headers
+                        $value = isset($row_data[$field_key]) ? $row_data[$field_key] : (isset($row_data[$field_label]) ? $row_data[$field_label] : null);
+                        
+                        if ($value !== null) {
+                            switch ($field['type']) {
+                                case 'repeater':
+                                case 'group':
+                                case 'flexible_content':
+                                    $json_value = json_decode($value, true);
+                                    if (json_last_error() === JSON_ERROR_NONE) {
+                                        update_field($field_key, $json_value, $post_id);
+                                    }
+                                    break;
+
+                                case 'taxonomy':
+                                    if (!empty($value)) {
+                                        $terms = array_map('trim', explode(',', $value));
+                                        $term_ids = array();
+                                        
+                                        foreach ($terms as $term_name) {
+                                            $term = get_term_by('name', $term_name, $field['taxonomy']);
+                                            if (!$term) {
+                                                $new_term = wp_insert_term($term_name, $field['taxonomy']);
+                                                if (!is_wp_error($new_term)) {
+                                                    $term_ids[] = $new_term['term_id'];
+                                                }
+                                            } else {
+                                                $term_ids[] = $term->term_id;
+                                            }
+                                        }
+                                        
+                                        if (!empty($term_ids)) {
+                                            update_field($field_key, $term_ids, $post_id);
+                                        }
+                                    }
+                                    break;
+
+                                case 'relationship':
+                                case 'post_object':
+                                    if (!empty($value)) {
+                                        $related_posts = array_map('trim', explode(',', $value));
+                                        $post_ids = array();
+                                        
+                                        foreach ($related_posts as $post_title) {
+                                            $related_post = get_page_by_title($post_title, OBJECT, $field['post_type']);
+                                            if ($related_post) {
+                                                $post_ids[] = $related_post->ID;
+                                            }
+                                        }
+                                        
+                                        if (!empty($post_ids)) {
+                                            if (!empty($field['multiple'])) {
+                                                update_field($field_key, $post_ids, $post_id);
+                                            } else {
+                                                update_field($field_key, $post_ids[0], $post_id);
+                                            }
+                                        }
+                                    }
+                                    break;
+
+                                default:
+                                    if (!empty($field['multiple']) && strpos($value, ',') !== false) {
+                                        $value = array_map('trim', explode(',', $value));
+                                    }
+                                    update_field($field_key, $value, $post_id);
+                                    break;
+                            }
+                        }
+                    }
+                }
+
+                // Process taxonomies
+                foreach ($headers as $header) {
+                    if (strpos($header, 'tax_') === 0) {
+                        $taxonomy = substr($header, 4);
+                        if (taxonomy_exists($taxonomy) && !empty($row_data[$header])) {
+                            $term_paths = array_filter(array_map('trim', explode('|', $row_data[$header])));
+                            $term_ids = array();
+                            
+                            foreach ($term_paths as $term_path) {
+                                $path_parts = array_filter(array_map('trim', explode('/', $term_path)));
+                                $parent_id = 0;
+                                
+                                // Create or get terms maintaining hierarchy
+                                foreach ($path_parts as $term_name) {
+                                    $args = array(
+                                        'name' => $term_name,
+                                        'parent' => $parent_id,
+                                        'taxonomy' => $taxonomy
+                                    );
+                                    
+                                    // Try to find the term at this level of hierarchy
+                                    $term = get_terms(array(
+                                        'name' => $term_name,
+                                        'parent' => $parent_id,
+                                        'taxonomy' => $taxonomy,
+                                        'hide_empty' => false,
+                                        'number' => 1
+                                    ));
+                                    
+                                    if (empty($term)) {
+                                        // Term doesn't exist, create it
+                                        $new_term = wp_insert_term($term_name, $taxonomy, array('parent' => $parent_id));
+                                        if (!is_wp_error($new_term)) {
+                                            $parent_id = $new_term['term_id'];
+                                            $term_ids[] = $parent_id;
+                                        }
+                                    } else {
+                                        // Term exists, use it
+                                        $parent_id = $term[0]->term_id;
+                                        $term_ids[] = $parent_id;
+                                    }
+                                }
+                            }
+                            
+                            if (!empty($term_ids)) {
+                                wp_set_object_terms($post_id, array_unique($term_ids), $taxonomy);
+                            }
+                        }
+                    }
+                }
+
+                $results['success'][] = sprintf(
+                    __('%s post: %s (ID: %d)', 'acf-import-export'),
+                    empty($post_data['ID']) ? 'Imported' : 'Updated',
+                    $post_data['post_title'],
+                    $post_id
+                );
+
+            } catch (Exception $e) {
+                $results['errors'][] = sprintf(
+                    __('Row %d: %s', 'acf-import-export'),
+                    $row_number,
+                    $e->getMessage()
+                );
             }
         }
 
-        foreach ($data as $row) {
-            $post_data = array(
-                'post_type' => $post_type,
-                'post_status' => 'publish'
-            );
+        fclose($handle);
 
-            // Map standard WordPress fields
-            $wp_fields = array(
-                'ID' => 'ID',
-                'Title' => 'post_title',
-                'Content' => 'post_content',
-                'Excerpt' => 'post_excerpt',
-                'Status' => 'post_status',
-                'Date' => 'post_date',
-                'Author' => 'post_author'
-            );
-
-            foreach ($wp_fields as $header => $wp_field) {
-                if (isset($row[$header])) {
-                    $post_data[$wp_field] = $row[$header];
-                }
-            }
-
-            // Check if post exists
-            $existing_id = isset($row['ID']) ? intval($row['ID']) : 0;
-            if ($existing_id) {
-                $existing_post = get_post($existing_id);
-                if ($existing_post && $existing_post->post_type === $post_type) {
-                    $post_data['ID'] = $existing_id;
-                }
-            }
-
-            // Insert or update post
-            $post_id = wp_insert_post($post_data, true);
-
-            if (is_wp_error($post_id)) {
-                $results['errors'][] = sprintf(
-                    /* translators: 1: The title of the post that failed to import, 2: The error message explaining why it failed */
-                    esc_html__('Failed to import post: %1$s. Error: %2$s', 'acf-import-export'),
-                    esc_html($row['Title']),
-                    esc_html($post_id->get_error_message())
-                );
-                continue;
-            }
-
-            // Handle taxonomies
-            foreach ($headers as $header) {
-                if (strpos($header, 'tax_') === 0) {
-                    $tax_name = substr($header, 4);
-                    if (isset($row[$header]) && taxonomy_exists($tax_name)) {
-                        $term_paths = explode(',', $row[$header]);
-                        $term_ids = array();
-                        
-                        foreach ($term_paths as $term_path) {
-                            $term_names = explode('|', $term_path);
-                            $parent_id = 0;
-                            
-                            // Create or get terms maintaining hierarchy
-                            foreach ($term_names as $term_name) {
-                                $term = get_term_by('name', $term_name, $tax_name);
-                                
-                                if (!$term) {
-                                    // Create new term
-                                    $term_data = array(
-                                        'name' => $term_name,
-                                        'parent' => $parent_id
-                                    );
-                                    $new_term = wp_insert_term($term_name, $tax_name, $term_data);
-                                    if (!is_wp_error($new_term)) {
-                                        $parent_id = $new_term['term_id'];
-                                        $term_ids[] = $parent_id;
-                                    }
-                                } else {
-                                    $parent_id = $term->term_id;
-                                    $term_ids[] = $parent_id;
-                                }
-                            }
-                        }
-                        
-                        if (!empty($term_ids)) {
-                            wp_set_object_terms($post_id, array_unique($term_ids), $tax_name);
-                        }
-                    }
-                }
-            }
-
-            // Handle ACF fields
-            $field_groups = acf_get_field_groups(array('post_type' => $post_type));
-            foreach ($field_groups as $field_group) {
-                $fields = acf_get_fields($field_group);
-                foreach ($fields as $field) {
-                    if (isset($row[$field['label']])) {
-                        $value = $row[$field['label']];
-                        
-                        // Handle different field types
-                        switch ($field['type']) {
-                            case 'taxonomy':
-                                // Handle taxonomy fields similar to regular taxonomies
-                                $term_paths = explode(',', $value);
-                                $term_ids = array();
-                                
-                                foreach ($term_paths as $term_path) {
-                                    $term_names = explode('|', $term_path);
-                                    $parent_id = 0;
-                                    
-                                    foreach ($term_names as $term_name) {
-                                        $term = get_term_by('name', $term_name, $field['taxonomy']);
-                                        
-                                        if (!$term) {
-                                            $term_data = array(
-                                                'name' => $term_name,
-                                                'parent' => $parent_id
-                                            );
-                                            $new_term = wp_insert_term($term_name, $field['taxonomy'], $term_data);
-                                            if (!is_wp_error($new_term)) {
-                                                $parent_id = $new_term['term_id'];
-                                                $term_ids[] = $parent_id;
-                                            }
-                                        } else {
-                                            $parent_id = $term->term_id;
-                                            $term_ids[] = $parent_id;
-                                        }
-                                    }
-                                }
-                                
-                                if (!empty($term_ids)) {
-                                    update_field($field['name'], array_unique($term_ids), $post_id);
-                                }
-                                break;
-                                
-                            case 'relationship':
-                            case 'post_object':
-                                // Handle related posts with hierarchy
-                                $post_paths = explode(',', $value);
-                                $post_ids = array();
-                                
-                                foreach ($post_paths as $post_path) {
-                                    $post_titles = explode('|', $post_path);
-                                    $last_title = end($post_titles);
-                                    
-                                    // Find the post by its title using WP_Query
-                                    $query = new WP_Query(array(
-                                        'post_type' => $field['post_type'],
-                                        'title' => $last_title,
-                                        'posts_per_page' => 1,
-                                        'post_status' => 'any',
-                                        'fields' => 'ids'
-                                    ));
-                                    
-                                    if ($query->have_posts()) {
-                                        $post_ids[] = $query->posts[0];
-                                    }
-                                }
-                                
-                                if (!empty($post_ids)) {
-                                    if ($field['multiple']) {
-                                        update_field($field['name'], $post_ids, $post_id);
-                                    } else {
-                                        update_field($field['name'], $post_ids[0], $post_id);
-                                    }
-                                }
-                                break;
-                                
-                            case 'repeater':
-                            case 'group':
-                            case 'flexible_content':
-                                // For complex fields, parse the JSON structure
-                                $complex_value = json_decode($value, true);
-                                if ($complex_value !== null) {
-                                    update_field($field['name'], $complex_value, $post_id);
-                                }
-                                break;
-                                
-                            default:
-                                // For other field types, handle comma-separated values
-                                if (strpos($value, ',') !== false && $field['multiple']) {
-                                    $value = explode(',', $value);
-                                }
-                                update_field($field['name'], $value, $post_id);
-                        }
-                    }
-                }
-            }
-
-            $results['success'][] = sprintf(
-                /* translators: 1: The import status (either "Updated" or "Imported"), 2: The title of the post that was imported or updated */
-                esc_html__('%1$s post: %2$s', 'acf-import-export'),
-                $existing_id ? esc_html__('Updated', 'acf-import-export') : esc_html__('Imported', 'acf-import-export'),
-                esc_html($row['Title'])
-            );
+        // If no successful imports and we have errors, throw an exception
+        if (empty($results['success']) && !empty($results['errors'])) {
+            throw new Exception(sprintf(
+                __('Import failed. Errors: %s', 'acf-import-export'),
+                implode(', ', $results['errors'])
+            ));
         }
 
         return $results;
+    }
+
+    private function get_upload_error_message($error_code) {
+        switch ($error_code) {
+            case UPLOAD_ERR_INI_SIZE:
+                return __('The uploaded file exceeds the upload_max_filesize directive in php.ini.', 'acf-import-export');
+            case UPLOAD_ERR_FORM_SIZE:
+                return __('The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.', 'acf-import-export');
+            case UPLOAD_ERR_PARTIAL:
+                return __('The uploaded file was only partially uploaded. Please try again.', 'acf-import-export');
+            case UPLOAD_ERR_NO_FILE:
+                return __('No file was uploaded. Please select a file to import.', 'acf-import-export');
+            case UPLOAD_ERR_NO_TMP_DIR:
+                return __('Missing a temporary folder. Please contact your hosting provider.', 'acf-import-export');
+            case UPLOAD_ERR_CANT_WRITE:
+                return __('Failed to write file to disk. Please check folder permissions or contact your hosting provider.', 'acf-import-export');
+            case UPLOAD_ERR_EXTENSION:
+                return __('File upload stopped by extension. Please contact your hosting provider.', 'acf-import-export');
+            default:
+                return __('Unknown upload error occurred. Please try again or contact support.', 'acf-import-export');
+        }
     }
 } 

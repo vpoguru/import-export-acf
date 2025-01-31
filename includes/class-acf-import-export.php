@@ -209,14 +209,8 @@ class ACF_Import_Export {
                                     <label><?php esc_html_e('Export Format', 'acf-import-export'); ?></label>
                                 </th>
                                 <td>
-                                    <label>
-                                        <input type="radio" name="export_format" value="json" checked>
-                                        <?php esc_html_e('JSON', 'acf-import-export'); ?>
-                                    </label><br>
-                                    <label>
-                                        <input type="radio" name="export_format" value="csv">
-                                        <?php esc_html_e('CSV', 'acf-import-export'); ?>
-                                    </label>
+                                    <p class="description"><?php esc_html_e('Data will be exported in CSV format', 'acf-import-export'); ?></p>
+                                    <input type="hidden" name="export_format" value="csv">
                                 </td>
                             </tr>
                         </table>

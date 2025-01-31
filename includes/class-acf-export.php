@@ -125,7 +125,7 @@ class ACF_Export {
         $taxonomies = get_object_taxonomies($post_type, 'objects');
         $tax_columns = array();
         foreach ($taxonomies as $tax) {
-            $tax_columns['tax_' . $tax->name] = $tax->label;
+            $tax_columns['tax_' . $tax->name] = $tax->labels->name;
         }
 
         // If no columns selected, use all
@@ -142,7 +142,7 @@ class ACF_Export {
             if (isset($wp_columns[$column])) {
                 $headers[] = $wp_columns[$column];
             } elseif (isset($tax_columns[$column])) {
-                $headers[] = $tax_columns[substr($column, 4)];
+                $headers[] = $tax_columns[$column];
             } elseif (isset($acf_fields[$column])) {
                 $headers[] = $acf_fields[$column]['label'];
             }
@@ -152,124 +152,133 @@ class ACF_Export {
         foreach ($posts as $post) {
             $row = array();
             foreach ($selected_columns as $column) {
+                $value = '';
+                
+                // Handle WordPress core fields
                 if (isset($wp_columns[$column])) {
-                    // WordPress core fields
-                    $row[] = $post->$column;
-                } elseif (strpos($column, 'tax_') === 0) {
-                    // Taxonomy terms with hierarchy
-                    $tax_name = substr($column, 4);
-                    $terms = wp_get_post_terms($post->ID, $tax_name, array('orderby' => 'parent'));
-                    
-                    // Build hierarchical term paths
-                    $term_paths = array();
-                    foreach ($terms as $term) {
-                        $term_path = array($term->name);
-                        $parent_id = $term->parent;
-                        
-                        // Build the full hierarchical path
-                        while ($parent_id) {
-                            $parent = get_term($parent_id, $tax_name);
-                            if ($parent && !is_wp_error($parent)) {
-                                array_unshift($term_path, $parent->name);
-                                $parent_id = $parent->parent;
-                            } else {
-                                break;
-                            }
-                        }
-                        
-                        $term_paths[] = implode('|', $term_path);
+                    switch ($column) {
+                        case 'ID':
+                            $value = $post->ID;
+                            break;
+                        case 'post_title':
+                            $value = $post->post_title;
+                            break;
+                        case 'post_content':
+                            $value = $post->post_content;
+                            break;
+                        case 'post_excerpt':
+                            $value = $post->post_excerpt;
+                            break;
+                        case 'post_status':
+                            $value = $post->post_status;
+                            break;
+                        case 'post_date':
+                            $value = $post->post_date;
+                            break;
+                        case 'post_author':
+                            $author = get_user_by('id', $post->post_author);
+                            $value = $author ? $author->display_name : '';
+                            break;
                     }
-                    
-                    $row[] = implode(',', $term_paths);
-                } else {
-                    // ACF fields
+                }
+                // Handle taxonomies
+                elseif (strpos($column, 'tax_') === 0) {
+                    $taxonomy = substr($column, 4);
+                    $terms = wp_get_object_terms($post->ID, $taxonomy, array('orderby' => 'parent'));
+                    if (!is_wp_error($terms)) {
+                        $term_paths = array();
+                        foreach ($terms as $term) {
+                            $term_path = array($term->name);
+                            $parent_id = $term->parent;
+                            
+                            // Build the full hierarchical path
+                            while ($parent_id) {
+                                $parent = get_term($parent_id, $taxonomy);
+                                if ($parent && !is_wp_error($parent)) {
+                                    array_unshift($term_path, $parent->name);
+                                    $parent_id = $parent->parent;
+                                } else {
+                                    break;
+                                }
+                            }
+                            $term_paths[] = implode('/', $term_path);
+                        }
+                        $value = implode('|', $term_paths);
+                    }
+                }
+                // Handle ACF fields
+                elseif (isset($acf_fields[$column])) {
                     $field = $acf_fields[$column];
-                    $value = get_field($column, $post->ID);
+                    $field_value = get_field($field['name'], $post->ID);
                     
-                    // Handle different ACF field types
                     switch ($field['type']) {
                         case 'taxonomy':
-                            // Handle taxonomy fields similar to regular taxonomies
-                            if (is_array($value)) {
-                                $term_paths = array();
-                                foreach ($value as $term) {
-                                    $term_path = array($term->name);
-                                    $parent_id = $term->parent;
-                                    while ($parent_id) {
-                                        $parent = get_term($parent_id, $field['taxonomy']);
-                                        if ($parent && !is_wp_error($parent)) {
-                                            array_unshift($term_path, $parent->name);
-                                            $parent_id = $parent->parent;
-                                        } else {
-                                            break;
+                            if (!empty($field_value)) {
+                                if (is_array($field_value)) {
+                                    $term_names = array();
+                                    foreach ($field_value as $term) {
+                                        if (is_object($term)) {
+                                            $term_names[] = $term->name;
+                                        } elseif (is_numeric($term)) {
+                                            $term_obj = get_term($term);
+                                            if ($term_obj && !is_wp_error($term_obj)) {
+                                                $term_names[] = $term_obj->name;
+                                            }
                                         }
                                     }
-                                    $term_paths[] = implode('|', $term_path);
+                                    $value = implode(',', $term_names);
                                 }
-                                $value = implode(',', $term_paths);
                             }
                             break;
                             
                         case 'relationship':
                         case 'post_object':
-                            // Handle related posts with hierarchy
-                            if (is_array($value)) {
-                                $post_paths = array();
-                                foreach ($value as $related_post) {
-                                    $post_path = array($related_post->post_title);
-                                    $parent_id = $related_post->post_parent;
-                                    while ($parent_id) {
-                                        $parent = get_post($parent_id);
-                                        if ($parent) {
-                                            array_unshift($post_path, $parent->post_title);
-                                            $parent_id = $parent->post_parent;
-                                        } else {
-                                            break;
+                            if (!empty($field_value)) {
+                                if (is_array($field_value)) {
+                                    $post_titles = array();
+                                    foreach ($field_value as $related_post) {
+                                        if (is_object($related_post)) {
+                                            $post_titles[] = $related_post->post_title;
+                                        } elseif (is_numeric($related_post)) {
+                                            $post_obj = get_post($related_post);
+                                            if ($post_obj) {
+                                                $post_titles[] = $post_obj->post_title;
+                                            }
                                         }
                                     }
-                                    $post_paths[] = implode('|', $post_path);
-                                }
-                                $value = implode(',', $post_paths);
-                            } elseif (is_object($value)) {
-                                $post_path = array($value->post_title);
-                                $parent_id = $value->post_parent;
-                                while ($parent_id) {
-                                    $parent = get_post($parent_id);
-                                    if ($parent) {
-                                        array_unshift($post_path, $parent->post_title);
-                                        $parent_id = $parent->post_parent;
-                                    } else {
-                                        break;
+                                    $value = implode(',', $post_titles);
+                                } elseif (is_object($field_value)) {
+                                    $value = $field_value->post_title;
+                                } elseif (is_numeric($field_value)) {
+                                    $post_obj = get_post($field_value);
+                                    if ($post_obj) {
+                                        $value = $post_obj->post_title;
                                     }
                                 }
-                                $value = implode('|', $post_path);
                             }
                             break;
                             
                         case 'repeater':
                         case 'group':
                         case 'flexible_content':
-                            // For complex fields, serialize the data
-                            $value = maybe_serialize($value);
+                            $value = json_encode($field_value);
                             break;
                             
                         default:
-                            // For other field types, convert arrays to comma-separated values
-                            if (is_array($value)) {
-                                $value = implode(',', $value);
+                            if (is_array($field_value)) {
+                                $value = implode(',', $field_value);
+                            } else {
+                                $value = $field_value;
                             }
                     }
-                    
-                    $row[] = $value;
                 }
+                
+                $row[] = $value;
             }
             $data[] = $row;
         }
 
         // Create temporary file
-        global $wp_filesystem;
-        WP_Filesystem();
-
         $filename = sanitize_file_name($post_type . '-export-' . gmdate('Y-m-d') . '.csv');
         $upload_dir = wp_upload_dir();
         $temp_file = trailingslashit($upload_dir['path']) . $filename;
@@ -280,6 +289,9 @@ class ACF_Export {
             $csv_content .= $this->generate_csv_row(array_map('esc_html', $row));
         }
 
+        // Write to file using WP_Filesystem
+        global $wp_filesystem;
+        WP_Filesystem();
         $wp_filesystem->put_contents($temp_file, $csv_content);
 
         // Send headers
@@ -288,16 +300,14 @@ class ACF_Export {
         header('Pragma: no-cache');
         header('Expires: 0');
 
-        // Output file contents using WP_Filesystem
+        // Output file contents
         if (!$wp_filesystem->exists($temp_file)) {
             wp_die(esc_html__('Error: Temporary file not found.', 'acf-import-export'));
         }
         
-        // For CSV files, we need to preserve the exact content
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- CSV data should not be escaped to maintain format
         echo $wp_filesystem->get_contents($temp_file);
 
-        // Clean up using WP_Filesystem
+        // Clean up
         $wp_filesystem->delete($temp_file);
         exit;
     }
