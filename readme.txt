@@ -1,4 +1,4 @@
-=== ACF Import Export ===
+===  Import/Export for Advanced Custom Fields ===
 Contributors: vanshbordia
 Tags: acf, import, export, advanced custom fields, csv
 Requires at least: 5.0
@@ -82,8 +82,8 @@ Initial release of ACF Import Export. Includes full support for CSV import/expor
 
 == Development ==
 
-* [GitHub Repository](https://github.com/vanshbordia/acf-import-export)
-* Report issues and contribute: [GitHub Issues](https://github.com/vanshbordia/acf-import-export/issues)
+* [GitHub Repository](https://github.com/vanshbordia/import-export-acf)
+* Report issues and contribute: [GitHub Issues](https://github.com/vanshbordia/import-export-acf/issues)
 
 == Credits ==
 
