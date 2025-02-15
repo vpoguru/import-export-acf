@@ -53,6 +53,9 @@ class ACF_Import_Export {
         add_action('admin_init', array($this, 'handle_export'));
         add_action('admin_init', array($this, 'handle_import'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_scripts'));
+        
+        // Add AJAX handlers
+        add_action('wp_ajax_get_post_type_taxonomies', array($this, 'ajax_get_post_type_taxonomies'));
     }
 
     public function add_admin_menu() {
@@ -83,19 +86,62 @@ class ACF_Import_Export {
             ACF_IMPORT_EXPORT_VERSION
         );
         wp_enqueue_style('import-export-acf-styles');
+    }
 
-        // Register and enqueue the JavaScript
-        wp_register_script(
-            'import-export-acf-admin',
-            ACF_IMPORT_EXPORT_PLUGIN_URL . 'assets/js/admin.js',
-            array('jquery'),
-            ACF_IMPORT_EXPORT_VERSION,
-            true
-        );
-        wp_enqueue_script('import-export-acf-admin');
+    /**
+     * AJAX handler to get taxonomies for a post type
+     */
+    public function ajax_get_post_type_taxonomies() {
+        // Check nonce
+        if (!check_ajax_referer('acf_import_export_nonce', 'nonce', false)) {
+            wp_send_json_error('Invalid nonce');
+            return;
+        }
+
+        // Check if post type is provided
+        if (empty($_POST['post_type'])) {
+            wp_send_json_error('No post type provided');
+            return;
+        }
+
+        // Get and sanitize the post type
+        $post_type = sanitize_key($_POST['post_type']);
+
+        // Get taxonomies for this post type
+        $taxonomies = get_object_taxonomies($post_type, 'objects');
+        
+        if (empty($taxonomies)) {
+            wp_send_json_error('No taxonomies found');
+            return;
+        }
+
+        // Format taxonomies for response
+        $formatted_taxonomies = array();
+        foreach ($taxonomies as $taxonomy) {
+            $formatted_taxonomies[] = array(
+                'name' => $taxonomy->name,
+                'label' => $taxonomy->label
+            );
+        }
+
+        wp_send_json_success($formatted_taxonomies);
     }
 
     public function render_admin_page() {
+        // Verify nonce if form was submitted
+        if (!empty($_POST)) {
+            if (!isset($_POST['acf_export_nonce']) || !wp_verify_nonce($_POST['acf_export_nonce'], 'acf_export_nonce')) {
+                wp_die(
+                    esc_html__('Invalid nonce specified', 'import-export-acf'), 
+                    esc_html__('Error', 'import-export-acf'), 
+                    array(
+                        'response' => 403,
+                        'back_link' => true,
+                    )
+                );
+            }
+        }
+
         // Get all post types including built-in ones except revisions and menus
         $post_types = get_post_types(array(
             'show_ui' => true
@@ -107,8 +153,14 @@ class ACF_Import_Export {
         unset($post_types['custom_css']);
         unset($post_types['customize_changeset']);
 
-        // Get all taxonomies
-        $all_taxonomies = get_taxonomies(array(), 'objects');
+        // Get selected post type if any
+        $selected_post_type = isset($_POST['export_post_type']) ? sanitize_key($_POST['export_post_type']) : '';
+        
+        // Get taxonomies for selected post type
+        $post_type_taxonomies = array();
+        if ($selected_post_type) {
+            $post_type_taxonomies = get_object_taxonomies($selected_post_type, 'objects');
+        }
         
         // Get all ACF field groups
         $all_field_groups = array();
@@ -117,49 +169,54 @@ class ACF_Import_Export {
         }
         ?>
         <div class="wrap">
-            <h1>Import/Export for Advanced Custom Fields</h1>
+            <h1><?php esc_html_e('Import/Export for Advanced Custom Fields', 'import-export-acf'); ?></h1>
             
             <!-- Export Section -->
             <div class="card">
-                <h2>Export</h2>
+                <h2><?php esc_html_e('Export', 'import-export-acf'); ?></h2>
                 <form method="post" action="">
                     <?php wp_nonce_field('acf_export_nonce', 'acf_export_nonce'); ?>
                     
                     <div class="export-section">
-                        <h3>Select Post Type to Export</h3>
-                        <select name="export_post_type" id="export_post_type" required>
-                            <option value="">Select a post type...</option>
+                        <h3><?php esc_html_e('Select Post Type to Export', 'import-export-acf'); ?></h3>
+                        <select name="export_post_type" id="export_post_type" onchange="this.form.submit()" required>
+                            <option value=""><?php esc_html_e('Select a post type...', 'import-export-acf'); ?></option>
                             <?php foreach ($post_types as $post_type): ?>
-                            <option value="<?php echo esc_attr($post_type->name); ?>">
+                            <option value="<?php echo esc_attr($post_type->name); ?>" <?php selected($selected_post_type, $post_type->name); ?>>
                                 <?php echo esc_html($post_type->label); ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
 
-                        <h3>Export Options</h3>
+                        <?php if ($selected_post_type): ?>
+                        <h3><?php esc_html_e('Export Options', 'import-export-acf'); ?></h3>
                         
                         <!-- Taxonomy Options -->
                         <div class="option-section">
                             <label>
                                 <input type="checkbox" name="export_options[]" value="taxonomies" class="toggle-section" data-section="taxonomy-options" checked>
-                                Include Taxonomies
+                                <?php esc_html_e('Include Taxonomies', 'import-export-acf'); ?>
                             </label>
-                            <div class="sub-options taxonomy-options">
+                            <div class="sub-options taxonomy-options" style="margin-left: 20px;">
                                 <label>
                                     <input type="radio" name="taxonomy_selection" value="all" checked>
-                                    Export All Taxonomies
-                                </label>
+                                    <?php esc_html_e('Export All Taxonomies', 'import-export-acf'); ?>
+                                </label><br>
                                 <label>
                                     <input type="radio" name="taxonomy_selection" value="selected">
-                                    Select Specific Taxonomies
+                                    <?php esc_html_e('Select Specific Taxonomies', 'import-export-acf'); ?>
                                 </label>
-                                <div class="specific-options taxonomy-list" style="display: none; padding-left: 20px; margin-top: 10px;">
-                                    <?php foreach ($all_taxonomies as $taxonomy): ?>
-                                    <label>
-                                        <input type="checkbox" name="specific_taxonomies[]" value="<?php echo esc_attr($taxonomy->name); ?>">
-                                        <?php echo esc_html($taxonomy->label); ?>
-                                    </label><br>
-                                    <?php endforeach; ?>
+                                <div class="taxonomy-list" style="margin: 10px 0 10px 20px;">
+                                    <?php if (!empty($post_type_taxonomies)): ?>
+                                        <?php foreach ($post_type_taxonomies as $taxonomy): ?>
+                                        <label style="display: block; margin-bottom: 5px;">
+                                            <input type="checkbox" name="specific_taxonomies[]" value="<?php echo esc_attr($taxonomy->name); ?>">
+                                            <?php echo esc_html($taxonomy->label); ?>
+                                        </label>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <p><?php esc_html_e('No taxonomies found for this post type.', 'import-export-acf'); ?></p>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </div>
@@ -168,24 +225,28 @@ class ACF_Import_Export {
                         <div class="option-section">
                             <label>
                                 <input type="checkbox" name="export_options[]" value="acf_fields" class="toggle-section" data-section="acf-options" checked>
-                                Include ACF Fields
+                                <?php esc_html_e('Include ACF Fields', 'import-export-acf'); ?>
                             </label>
-                            <div class="sub-options acf-options">
+                            <div class="sub-options acf-options" style="margin-left: 20px;">
                                 <label>
                                     <input type="radio" name="acf_selection" value="all" checked>
-                                    Export All ACF Fields
-                                </label>
+                                    <?php esc_html_e('Export All ACF Fields', 'import-export-acf'); ?>
+                                </label><br>
                                 <label>
                                     <input type="radio" name="acf_selection" value="selected">
-                                    Select Specific Field Groups
+                                    <?php esc_html_e('Select Specific Field Groups', 'import-export-acf'); ?>
                                 </label>
-                                <div class="specific-options acf-list" style="display: none; padding-left: 20px; margin-top: 10px;">
-                                    <?php foreach ($all_field_groups as $field_group): ?>
-                                    <label>
-                                        <input type="checkbox" name="specific_acf_groups[]" value="<?php echo esc_attr($field_group['key']); ?>">
-                                        <?php echo esc_html($field_group['title']); ?>
-                                    </label><br>
-                                    <?php endforeach; ?>
+                                <div class="acf-list" style="margin: 10px 0 10px 20px;">
+                                    <?php if (!empty($all_field_groups)): ?>
+                                        <?php foreach ($all_field_groups as $field_group): ?>
+                                        <label style="display: block; margin-bottom: 5px;">
+                                            <input type="checkbox" name="specific_acf_groups[]" value="<?php echo esc_attr($field_group['key']); ?>">
+                                            <?php echo esc_html($field_group['title']); ?>
+                                        </label>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <p><?php esc_html_e('No ACF field groups found.', 'import-export-acf'); ?></p>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </div>
@@ -194,14 +255,15 @@ class ACF_Import_Export {
                         <div class="option-section">
                             <label>
                                 <input type="checkbox" name="export_options[]" value="featured_image" checked>
-                                Include Featured Image URL
+                                <?php esc_html_e('Include Featured Image URL', 'import-export-acf'); ?>
                             </label>
                         </div>
-                    </div>
 
-                    <p>
-                        <input type="submit" name="acf_export" class="button button-primary" value="Export to CSV">
-                    </p>
+                        <p class="submit">
+                            <input type="submit" name="acf_export" class="button button-primary" value="<?php esc_attr_e('Export to CSV', 'import-export-acf'); ?>">
+                        </p>
+                        <?php endif; ?>
+                    </div>
                 </form>
             </div>
 
@@ -305,11 +367,42 @@ class ACF_Import_Export {
             if ($taxonomy_selection === 'all') {
                 $taxonomies = get_object_taxonomies($post_type, 'objects');
             } else {
+                // Only include specifically selected taxonomies
                 foreach ($specific_taxonomies as $tax_name) {
                     if (taxonomy_exists($tax_name)) {
                         $taxonomy = get_taxonomy($tax_name);
                         if ($taxonomy) {
                             $taxonomies[$tax_name] = $taxonomy;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Initialize ACF fields array based on selection
+        $acf_fields = array();
+        if (in_array('acf_fields', $export_options, true) && function_exists('acf_get_field_groups')) {
+            if ($acf_selection === 'all') {
+                // Get all field groups and their fields
+                $field_groups = acf_get_field_groups();
+                foreach ($field_groups as $field_group) {
+                    $fields = acf_get_fields($field_group);
+                    if ($fields) {
+                        foreach ($fields as $field) {
+                            $acf_fields[$field['name']] = $field['label'];
+                        }
+                    }
+                }
+            } else {
+                // Only include fields from specifically selected field groups
+                foreach ($specific_acf_groups as $group_key) {
+                    $field_group = acf_get_field_group($group_key);
+                    if ($field_group) {
+                        $fields = acf_get_fields($field_group);
+                        if ($fields) {
+                            foreach ($fields as $field) {
+                                $acf_fields[$field['name']] = $field['label'];
+                            }
                         }
                     }
                 }
@@ -327,15 +420,15 @@ class ACF_Import_Export {
             esc_html__('Post Modified', 'import-export-acf')
         );
 
-        // Add taxonomy headers
-        if (in_array('taxonomies', $export_options, true)) {
+        // Add taxonomy headers only for selected taxonomies
+        if (in_array('taxonomies', $export_options, true) && !empty($taxonomies)) {
             foreach ($taxonomies as $taxonomy) {
                 $headers[] = esc_html($taxonomy->label);
             }
         }
 
-        // Add ACF field headers
-        if (in_array('acf_fields', $export_options, true)) {
+        // Add ACF field headers only for selected fields
+        if (in_array('acf_fields', $export_options, true) && !empty($acf_fields)) {
             foreach ($acf_fields as $field_name => $field_label) {
                 $headers[] = esc_html($field_label);
             }
@@ -446,19 +539,34 @@ class ACF_Import_Export {
      * @return string CSV formatted line with proper escaping
      */
     private function array_to_csv($fields) {
-        // Use WP_Filesystem instead of fopen
-        $f = $wp_filesystem->get_contents('php://memory');
-        if ($f === false) {
+        global $wp_filesystem;
+        
+        if (empty($wp_filesystem)) {
+            require_once(ABSPATH . '/wp-admin/includes/file.php');
+            WP_Filesystem();
+        }
+
+        // Create a temporary file
+        $temp_file = wp_tempnam('csv-line');
+        if (!$temp_file) {
             return '';
         }
+
+        // Format the fields as CSV
+        $output = array();
+        foreach ($fields as $field) {
+            $output[] = '"' . str_replace('"', '""', $field) . '"';
+        }
+        $csv_line = implode(',', $output) . "\n";
+
+        // Write to temp file and read back
+        $wp_filesystem->put_contents($temp_file, $csv_line);
+        $result = $wp_filesystem->get_contents($temp_file);
         
-        fputcsv($f, $fields);
-        rewind($f);
-        // Use WP_Filesystem instead of fclose
-        $csv_line = stream_get_contents($f);
-        $wp_filesystem->put_contents('php://memory', $csv_line);
+        // Clean up
+        $wp_filesystem->delete($temp_file);
         
-        return $csv_line;
+        return $result;
     }
 
     private function get_attachment_id_from_url($image_url) {
@@ -725,7 +833,7 @@ class ACF_Import_Export {
             $taxonomy_name = isset($taxonomy_map[$header]) ? $taxonomy_map[$header] : false;
             
             if ($taxonomy_name && taxonomy_exists($taxonomy_name)) {
-                $this->process_taxonomy_terms($post_id, $taxonomy_name, explode(',', $row[$index]));
+                $this->process_taxonomy_terms($post_id, $taxonomy_name, explode(',', $row[$index]), 'import-export-acf');
             } else {
                 // Process ACF field
                 $field_key = $this->get_acf_field_key($header, $post_id);
@@ -839,13 +947,18 @@ class ACF_Import_Export {
         return $terms;
     }
 
-    private function process_taxonomy_terms($post_id, $taxonomy_name, $term_names, $cache_group) {
+    private function process_taxonomy_terms($post_id, $taxonomy_name, $term_names, $cache_group = 'import-export-acf') {
         // Get existing terms from cache
         $existing_terms = $this->get_cached_terms($taxonomy_name, $cache_group);
         
         // Process terms
         $term_ids = array();
         foreach ($term_names as $term_name) {
+            $term_name = trim($term_name);
+            if (empty($term_name)) {
+                continue;
+            }
+
             $term_id = array_search($term_name, $existing_terms);
             
             if (!$term_id) {
@@ -884,12 +997,15 @@ class ACF_Import_Export {
             !empty($context) ? json_encode($context) : ''
         );
 
-        // Use WP_Filesystem instead of fopen
-        $f = $wp_filesystem->get_contents('php://memory');
-        if ($f === false) {
-            return;
+        // Use wp_privacy_anonymize_data to ensure sensitive data is not logged
+        $log_message = wp_privacy_anonymize_data($log_message, 'text');
+        
+        // Log using WordPress error handler
+        if (function_exists('wp_debug_backtrace_summary')) {
+            $backtrace = wp_debug_backtrace_summary();
+            _doing_it_wrong(__FUNCTION__, esc_html($log_message), esc_html($backtrace));
+        } else {
+            _doing_it_wrong(__FUNCTION__, esc_html($log_message), '');
         }
-
-       
     }
 } 

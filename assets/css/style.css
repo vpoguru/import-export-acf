@@ -9,6 +9,7 @@
     margin-top: 20px;
     padding: 20px;
     box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    max-width: 800px;
 }
 
 .card h2 {
@@ -20,9 +21,9 @@
 .export-section {
     margin: 20px 0;
     padding: 15px;
-    background: #f9f9f9;
-    border: 1px solid #e5e5e5;
-    border-radius: 3px;
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
 }
 
 .export-section h3 {
@@ -44,16 +45,41 @@
 .option-section {
     margin: 15px 0;
     padding: 10px;
-    background: #fff;
+    background: #f9f9f9;
     border: 1px solid #e5e5e5;
-    border-radius: 3px;
 }
 
 .sub-options {
-    margin: 10px 0 10px 25px;
+    margin-top: 10px;
     padding: 10px;
-    background: #f5f5f5;
-    border-left: 4px solid #0073aa;
+    background: #fff;
+    border-left: 4px solid #646970;
+}
+
+.taxonomy-list,
+.acf-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    background: #fff;
+    display: none;
+}
+
+input[name="taxonomy_selection"][value="selected"]:checked ~ .taxonomy-list,
+input[name="acf_selection"][value="selected"]:checked ~ .acf-list {
+    display: block;
+}
+
+.taxonomy-list label,
+.acf-list label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+select#export_post_type {
+    min-width: 200px;
+    margin: 10px 0;
 }
 
 .specific-options {
@@ -99,4 +125,22 @@
 
 .card .button {
     margin-top: 10px;
+}
+
+.submit {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f5f5f5;
+    border-top: 1px solid #ddd;
+}
+
+/* Hide export options until post type is selected */
+.export-section h3:not(:first-child),
+.option-section {
+    display: none;
+}
+
+.export-section.has-post-type h3:not(:first-child),
+.export-section.has-post-type .option-section {
+    display: block;
 } 
