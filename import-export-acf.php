@@ -3,7 +3,7 @@
  * Plugin Name: Import/Export for Advanced Custom Fields
  * Plugin URI: https://vanshbordia.pages.dev/import-export-acf
  * Description: Import and export ACF fields, post types, taxonomies and related data
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Vansh Bordia
  * Author URI: https://vanshbordia.pages.dev/
  * License: GPL v3 or later
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ACF_IMPORT_EXPORT_VERSION', '1.0.0');
+define('ACF_IMPORT_EXPORT_VERSION', '1.1.0');
 define('ACF_IMPORT_EXPORT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ACF_IMPORT_EXPORT_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -41,7 +41,7 @@ function acf_import_export_init() {
         add_action('admin_notices', 'acf_import_export_admin_notice');
         return;
     }
-    
+
     // Initialize the main plugin class
     new ACF_Import_Export();
 }
@@ -53,7 +53,7 @@ class ACF_Import_Export {
         add_action('admin_init', array($this, 'handle_export'));
         add_action('admin_init', array($this, 'handle_import'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_scripts'));
-        
+
         // Add AJAX handlers
         add_action('wp_ajax_get_post_type_taxonomies', array($this, 'ajax_get_post_type_taxonomies'));
     }
@@ -109,7 +109,7 @@ class ACF_Import_Export {
 
         // Get taxonomies for this post type
         $taxonomies = get_object_taxonomies($post_type, 'objects');
-        
+
         if (empty($taxonomies)) {
             wp_send_json_error('No taxonomies found');
             return;
@@ -132,8 +132,8 @@ class ACF_Import_Export {
         if (!empty($_POST)) {
             if (!isset($_POST['acf_export_nonce']) || !wp_verify_nonce($_POST['acf_export_nonce'], 'acf_export_nonce')) {
                 wp_die(
-                    esc_html__('Invalid nonce specified', 'import-export-acf'), 
-                    esc_html__('Error', 'import-export-acf'), 
+                    esc_html__('Invalid nonce specified', 'import-export-acf'),
+                    esc_html__('Error', 'import-export-acf'),
                     array(
                         'response' => 403,
                         'back_link' => true,
@@ -146,7 +146,7 @@ class ACF_Import_Export {
         $post_types = get_post_types(array(
             'show_ui' => true
         ), 'objects');
-        
+
         // Remove unwanted post types
         unset($post_types['revision']);
         unset($post_types['nav_menu_item']);
@@ -155,13 +155,13 @@ class ACF_Import_Export {
 
         // Get selected post type if any
         $selected_post_type = isset($_POST['export_post_type']) ? sanitize_key($_POST['export_post_type']) : '';
-        
+
         // Get taxonomies for selected post type
         $post_type_taxonomies = array();
         if ($selected_post_type) {
             $post_type_taxonomies = get_object_taxonomies($selected_post_type, 'objects');
         }
-        
+
         // Get all ACF field groups
         $all_field_groups = array();
         if (function_exists('acf_get_field_groups')) {
@@ -170,13 +170,13 @@ class ACF_Import_Export {
         ?>
         <div class="wrap">
             <h1><?php esc_html_e('Import/Export for Advanced Custom Fields', 'import-export-acf'); ?></h1>
-            
+
             <!-- Export Section -->
             <div class="card">
                 <h2><?php esc_html_e('Export', 'import-export-acf'); ?></h2>
                 <form method="post" action="">
                     <?php wp_nonce_field('acf_export_nonce', 'acf_export_nonce'); ?>
-                    
+
                     <div class="export-section">
                         <h3><?php esc_html_e('Select Post Type to Export', 'import-export-acf'); ?></h3>
                         <select name="export_post_type" id="export_post_type" onchange="this.form.submit()" required>
@@ -190,7 +190,7 @@ class ACF_Import_Export {
 
                         <?php if ($selected_post_type): ?>
                         <h3><?php esc_html_e('Export Options', 'import-export-acf'); ?></h3>
-                        
+
                         <!-- Taxonomy Options -->
                         <div class="option-section">
                             <label>
@@ -287,8 +287,8 @@ class ACF_Import_Export {
 
     public function handle_export() {
         // Verify nonce and user capabilities first
-        if (!isset($_POST['acf_export']) || 
-            !check_admin_referer('acf_export_nonce', 'acf_export_nonce') || 
+        if (!isset($_POST['acf_export']) ||
+            !check_admin_referer('acf_export_nonce', 'acf_export_nonce') ||
             !current_user_can('manage_options')) {
             return;
         }
@@ -312,34 +312,34 @@ class ACF_Import_Export {
         }
 
         // Sanitize export options
-        $export_options = isset($_POST['export_options']) ? 
-            array_map('sanitize_key', wp_unslash($_POST['export_options'])) : 
+        $export_options = isset($_POST['export_options']) ?
+            array_map('sanitize_key', wp_unslash($_POST['export_options'])) :
             array();
-        
+
         // Validate and sanitize taxonomy selection
-        $taxonomy_selection = isset($_POST['taxonomy_selection']) ? 
-            sanitize_key(wp_unslash($_POST['taxonomy_selection'])) : 
+        $taxonomy_selection = isset($_POST['taxonomy_selection']) ?
+            sanitize_key(wp_unslash($_POST['taxonomy_selection'])) :
             'all';
         if (!in_array($taxonomy_selection, array('all', 'selected'), true)) {
             $taxonomy_selection = 'all';
         }
 
         // Sanitize specific taxonomies
-        $specific_taxonomies = isset($_POST['specific_taxonomies']) ? 
-            array_map('sanitize_key', wp_unslash($_POST['specific_taxonomies'])) : 
+        $specific_taxonomies = isset($_POST['specific_taxonomies']) ?
+            array_map('sanitize_key', wp_unslash($_POST['specific_taxonomies'])) :
             array();
-        
+
         // Validate and sanitize ACF selection
-        $acf_selection = isset($_POST['acf_selection']) ? 
-            sanitize_key(wp_unslash($_POST['acf_selection'])) : 
+        $acf_selection = isset($_POST['acf_selection']) ?
+            sanitize_key(wp_unslash($_POST['acf_selection'])) :
             'all';
         if (!in_array($acf_selection, array('all', 'selected'), true)) {
             $acf_selection = 'all';
         }
 
         // Sanitize specific ACF groups
-        $specific_acf_groups = isset($_POST['specific_acf_groups']) ? 
-            array_map('sanitize_key', wp_unslash($_POST['specific_acf_groups'])) : 
+        $specific_acf_groups = isset($_POST['specific_acf_groups']) ?
+            array_map('sanitize_key', wp_unslash($_POST['specific_acf_groups'])) :
             array();
 
         // Get all posts of the selected type
@@ -412,6 +412,7 @@ class ACF_Import_Export {
         // Prepare headers with proper escaping
         $headers = array(
             esc_html__('ID', 'import-export-acf'),
+            esc_html__('Post Type', 'import-export-acf'),
             esc_html__('Post Title', 'import-export-acf'),
             esc_html__('Post Content', 'import-export-acf'),
             esc_html__('Post Excerpt', 'import-export-acf'),
@@ -466,6 +467,7 @@ class ACF_Import_Export {
         foreach ($posts as $post) {
             $row = array(
                 absint($post->ID),
+                sanitize_text_field($post->post_type),
                 sanitize_text_field($post->post_title),
                 wp_kses_post($post->post_content),
                 sanitize_textarea_field($post->post_excerpt),
@@ -478,8 +480,8 @@ class ACF_Import_Export {
             if (in_array('taxonomies', $export_options, true)) {
                 foreach ($taxonomies as $taxonomy) {
                     $terms = wp_get_post_terms($post->ID, $taxonomy->name, array('fields' => 'names'));
-                    $row[] = !is_wp_error($terms) ? 
-                        implode(', ', array_map('sanitize_text_field', $terms)) : 
+                    $row[] = !is_wp_error($terms) ?
+                        implode(', ', array_map('sanitize_text_field', $terms)) :
                         '';
                 }
             }
@@ -540,7 +542,7 @@ class ACF_Import_Export {
      */
     private function array_to_csv($fields) {
         global $wp_filesystem;
-        
+
         if (empty($wp_filesystem)) {
             require_once(ABSPATH . '/wp-admin/includes/file.php');
             WP_Filesystem();
@@ -561,48 +563,47 @@ class ACF_Import_Export {
 
         // Write to temp file and read back
         $wp_filesystem->put_contents($temp_file, $csv_line);
-        $result = $wp_filesystem->get_contents($temp_file);
-        
+
         // Clean up
         $wp_filesystem->delete($temp_file);
-        
+
         return $result;
     }
 
     private function get_attachment_id_from_url($image_url) {
         $cache_key = 'acf_ie_img_' . md5($image_url);
         $attachment_id = wp_cache_get($cache_key, 'import-export-acf');
-        
+
         if (false === $attachment_id) {
             $upload_dir = wp_upload_dir();
             $site_url = get_site_url();
-            
+
             if (strpos($image_url, $site_url) === 0) {
                 // Use WordPress's built-in function to get attachment ID from URL
                 $attachment_id = attachment_url_to_postid($image_url);
-                
+
                 if ($attachment_id) {
                     wp_cache_set($cache_key, $attachment_id, 'import-export-acf', HOUR_IN_SECONDS);
                 }
             }
         }
-        
+
         return $attachment_id;
     }
 
     public function handle_import() {
         // Verify nonce and user capabilities first
-        if (!isset($_POST['acf_import']) || 
-            !check_admin_referer('acf_import_nonce', 'acf_import_nonce') || 
+        if (!isset($_POST['acf_import']) ||
+            !check_admin_referer('acf_import_nonce', 'acf_import_nonce') ||
             !current_user_can('manage_options')) {
             return;
         }
 
         // Validate file upload
-        if (!isset($_FILES['import_file']) || 
-            !isset($_FILES['import_file']['error']) || 
+        if (!isset($_FILES['import_file']) ||
+            !isset($_FILES['import_file']['error']) ||
             UPLOAD_ERR_OK !== $_FILES['import_file']['error']) {
-            
+
             $this->add_admin_notice(
                 esc_html__('Please select a valid CSV file to import.', 'import-export-acf'),
                 'error'
@@ -657,7 +658,7 @@ class ACF_Import_Export {
         }
 
         // Verify file exists and is readable
-        $tmp_file = wp_normalize_path($file['tmp_name']);
+        $tmp_file = $_FILES['import_file']['tmp_name'];
         if (!$wp_filesystem->exists($tmp_file) || !$wp_filesystem->is_readable($tmp_file)) {
             $this->add_admin_notice(
                 esc_html__('Error accessing the CSV file.', 'import-export-acf'),
@@ -667,8 +668,9 @@ class ACF_Import_Export {
         }
 
         // Read and validate file contents
-        $content = $wp_filesystem->get_contents($tmp_file);
-        if (false === $content) {
+        $rows = [];
+
+        if (!file_exists($tmp_file) || !is_readable($tmp_file)) {
             $this->add_admin_notice(
                 esc_html__('Error reading the CSV file.', 'import-export-acf'),
                 'error'
@@ -676,21 +678,42 @@ class ACF_Import_Export {
             return;
         }
 
-        // Remove BOM if present
-        $bom = pack('H*', 'EFBBBF');
-        $content = preg_replace("/^$bom/", '', $content);
+        // Ensure PHP reads embedded newlines inside quoted fields
+        ini_set("auto_detect_line_endings", true);
 
-        // Process the CSV content
-        $rows = array_map('str_getcsv', explode("\n", $content));
-        $headers = array_shift($rows);
+        $rows = [];
 
+        if (($handle = fopen($tmp_file, 'r')) === false) {
+            $this->add_admin_notice(
+                esc_html__('Unable to open the CSV file.', 'import-export-acf'),
+                'error'
+            );
+            return;
+        }
+
+        // Remove UTF-8 BOM if present
+        $bom = fread($handle, 3);
+        if ($bom !== "\xEF\xBB\xBF") {
+            rewind($handle);
+        }
+
+        // Read headers
+        $headers = fgetcsv($handle);
         if (empty($headers)) {
             $this->add_admin_notice(
                 esc_html__('Invalid CSV format: No headers found.', 'import-export-acf'),
                 'error'
             );
+            fclose($handle);
             return;
         }
+
+        // Read all remaining data rows (supports linefeeds inside fields!)
+        while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
+            $rows[] = $row;
+        }
+
+        fclose($handle);
 
         // Sanitize headers
         $headers = array_map('sanitize_text_field', $headers);
@@ -719,12 +742,18 @@ class ACF_Import_Export {
                 continue;
             }
 
+            // Replace actual line feeds (LF, chr(10) / "\n") with the literal string '\n'
+            // to preserve them through sanitization
+            $row = array_map(function($v) {
+                return is_string($v) ? str_replace("\n", '\\n', $v) : $v;
+            }, $row);
+
             // Sanitize row data
             $row = array_map('sanitize_text_field', $row);
 
             // Process post data
             $post_data = $this->prepare_post_data($row, $column_map);
-            
+
             if (empty($post_data['post_title'])) {
                 $stats['skipped']++;
                 continue;
@@ -732,7 +761,7 @@ class ACF_Import_Export {
 
             // Insert or update post
             $post_id = $this->insert_or_update_post($post_data, $stats);
-            
+
             if (!$post_id) {
                 continue;
             }
@@ -767,9 +796,10 @@ class ACF_Import_Export {
     /**
      * Prepare post data from CSV row
      */
-    private function prepare_post_data($row, $column_map) {
+    function prepare_post_data($row, $column_map) {
         return array(
             'ID'           => isset($row[$column_map['ID']]) ? absint($row[$column_map['ID']]) : 0,
+            'post_type'    => isset($row[$column_map['Post Type']]) ? sanitize_key($row[$column_map['Post Type']]) : 'post',
             'post_title'   => isset($row[$column_map['Post Title']]) ? sanitize_text_field($row[$column_map['Post Title']]) : '',
             'post_content' => isset($row[$column_map['Post Content']]) ? wp_kses_post($row[$column_map['Post Content']]) : '',
             'post_excerpt' => isset($row[$column_map['Post Excerpt']]) ? sanitize_textarea_field($row[$column_map['Post Excerpt']]) : '',
@@ -782,7 +812,7 @@ class ACF_Import_Export {
      */
     private function insert_or_update_post($post_data, &$stats) {
         $post_id = 0;
-        
+
         if ($post_data['ID'] > 0) {
             // Update existing post
             $post_id = wp_update_post($post_data, true);
@@ -831,17 +861,24 @@ class ACF_Import_Export {
 
             // Check if this header matches a taxonomy label
             $taxonomy_name = isset($taxonomy_map[$header]) ? $taxonomy_map[$header] : false;
-            
+
             if ($taxonomy_name && taxonomy_exists($taxonomy_name)) {
                 $this->process_taxonomy_terms($post_id, $taxonomy_name, explode(',', $row[$index]), 'import-export-acf');
             } else {
                 // Process ACF field
                 $field_key = $this->get_acf_field_key($header, $post_id);
+
                 if ($field_key) {
                     $value = $row[$index];
+
+                    // If JSON is recognised, decode
                     if ($this->is_json($value)) {
                         $value = json_decode($value, true);
                     }
+
+                    // Convert the literal string '\n' (backslash + n) back into an actual line feed (LF / chr(10))
+                    $value = str_replace('\\n', "\n", $value);
+
                     update_field($field_key, $value, $post_id);
                 }
             }
@@ -877,11 +914,11 @@ class ACF_Import_Export {
         // Cache ACF field keys
         $cache_key = 'acf_ie_field_' . md5($field_label . $post_id);
         $field_key = wp_cache_get($cache_key, 'import-export-acf');
-        
+
         if (false === $field_key) {
             // Get all field groups for this post
             $field_groups = acf_get_field_groups(array('post_id' => $post_id));
-            
+
             foreach ($field_groups as $field_group) {
                 $fields = acf_get_fields($field_group);
                 foreach ($fields as $field) {
@@ -893,7 +930,7 @@ class ACF_Import_Export {
                 }
             }
         }
-        
+
         return $field_key ? $field_key : false;
     }
 
@@ -914,7 +951,7 @@ class ACF_Import_Export {
             // Cache the downloaded image ID
             $cache_key = 'acf_ie_ext_img_' . md5($image_url . $post_id);
             $attachment_id = wp_cache_get($cache_key, 'import-export-acf');
-            
+
             if (false === $attachment_id) {
                 $attachment_id = media_sideload_image($image_url, $post_id, '', 'id');
                 if (!is_wp_error($attachment_id)) {
@@ -931,26 +968,26 @@ class ACF_Import_Export {
     private function get_cached_terms($taxonomy_name, $cache_group) {
         $cache_key = 'acf_ie_terms_' . md5($taxonomy_name);
         $terms = wp_cache_get($cache_key, $cache_group);
-        
+
         if (false === $terms) {
             $terms = get_terms(array(
                 'taxonomy' => $taxonomy_name,
                 'hide_empty' => false,
                 'fields' => 'id=>name'
             ));
-            
+
             if (!is_wp_error($terms)) {
                 wp_cache_set($cache_key, $terms, $cache_group, HOUR_IN_SECONDS);
             }
         }
-        
+
         return $terms;
     }
 
     private function process_taxonomy_terms($post_id, $taxonomy_name, $term_names, $cache_group = 'import-export-acf') {
         // Get existing terms from cache
         $existing_terms = $this->get_cached_terms($taxonomy_name, $cache_group);
-        
+
         // Process terms
         $term_ids = array();
         foreach ($term_names as $term_name) {
@@ -960,7 +997,7 @@ class ACF_Import_Export {
             }
 
             $term_id = array_search($term_name, $existing_terms);
-            
+
             if (!$term_id) {
                 // Term doesn't exist, create it
                 $new_term = wp_insert_term($term_name, $taxonomy_name);
@@ -971,17 +1008,17 @@ class ACF_Import_Export {
                     wp_cache_set('acf_ie_terms_' . md5($taxonomy_name), $existing_terms, $cache_group, HOUR_IN_SECONDS);
                 }
             }
-            
+
             if ($term_id) {
                 $term_ids[] = (int) $term_id;
             }
         }
-        
+
         // Set terms for post
         if (!empty($term_ids)) {
             return wp_set_object_terms($post_id, $term_ids, $taxonomy_name);
         }
-        
+
         return false;
     }
 
@@ -999,7 +1036,7 @@ class ACF_Import_Export {
 
         // Use wp_privacy_anonymize_data to ensure sensitive data is not logged
         $log_message = wp_privacy_anonymize_data($log_message, 'text');
-        
+
         // Log using WordPress error handler
         if (function_exists('wp_debug_backtrace_summary')) {
             $backtrace = wp_debug_backtrace_summary();
@@ -1008,4 +1045,4 @@ class ACF_Import_Export {
             _doing_it_wrong(__FUNCTION__, esc_html($log_message), '');
         }
     }
-} 
+}
